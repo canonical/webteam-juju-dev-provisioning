@@ -22,6 +22,7 @@ snap:
 
 runcmd:
   - DEBIAN_FRONTEND=noninteractive apt-get remove -y landscape-client landscape-common adwaita-icon-theme humanity-icon-theme
+  - DEBIAN_FRONTEND=noninteractive apt-get purge -y udisks2
   - DEBIAN_FRONTEND=noninteractive apt-get -y upgrade
   - DEBIAN_FRONTEND=noninteractive apt-get -y autoremove
 
@@ -33,6 +34,7 @@ runcmd:
       apport.service apport-autoreport.service \
       apt-daily.service apt-daily.timer \
       apt-daily-upgrade.service apt-daily-upgrade.timer \
+      udisks2.service udisks2.path \
       unattended-upgrades.service \
       motd-news.service motd-news.timer \
       ua-messaging.service ua-messaging.timer \

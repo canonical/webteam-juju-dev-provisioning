@@ -94,6 +94,7 @@ lxc launch "$IMAGE" "$INSTANCE_NAME" \
     --config=user.user-data="$(cat "$CLOUD_INIT_FILE")" \
     --config=limits.cpu="$CPUS" \
     --config=limits.memory="$MEMORY" \
+    --config=boot.autostart=false \
     --config=security.nesting=true \
     --config=security.privileged=true \
     --config=linux.kernel_modules="ip_vs,ip_vs_rr,ip_vs_wrr,ip_vs_sh,ip_tables,ip6_tables,netlink_diag,nf_nat,overlay,br_netfilter" \
