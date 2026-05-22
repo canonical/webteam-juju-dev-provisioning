@@ -20,20 +20,20 @@ From your project directory, run the init script with your chosen backend:
 
 ```bash
 # LXD container (lighter, shared host kernel)
-BACKEND=lxd bash <(curl -fsSL https://raw.githubusercontent.com/pedoch/local-juju-env-provisioning/main/init.sh)
+BACKEND=lxd bash <(curl -fsSL https://raw.githubusercontent.com/canonical/webteam-juju-dev-provisioning/main/init.sh)
 
 # Multipass VM (heavier, full isolation)
-BACKEND=vm bash <(curl -fsSL https://raw.githubusercontent.com/pedoch/local-juju-env-provisioning/main/init.sh)
+BACKEND=vm bash <(curl -fsSL https://raw.githubusercontent.com/canonical/webteam-juju-dev-provisioning/main/init.sh)
 
 # Pin to a specific release
-BACKEND=lxd VERSION=v1.2.0 bash <(curl -fsSL https://raw.githubusercontent.com/pedoch/local-juju-env-provisioning/main/init.sh)
+BACKEND=lxd VERSION=v1.2.0 bash <(curl -fsSL https://raw.githubusercontent.com/canonical/webteam-juju-dev-provisioning/main/init.sh)
 ```
 
 | Variable  | Default | Description |
 |-----------|---------|-------------|
 | `BACKEND` | _(required)_ | `vm` or `lxd` |
 | `VERSION` | `main` | Git tag or branch to fetch from |
-| `REPO`    | `pedoch/local-juju-env-provisioning` | GitHub org/repo override |
+| `REPO`    | `canonical/webteam-juju-dev-provisioning` | GitHub org/repo override |
 
 ### 2. Configure your environment
 
@@ -189,7 +189,7 @@ juju_local.yaml
 
 This repository uses semantic versioning. Pin to a specific version tag in your scripts.
 
-Check the [releases page](https://github.com/pedoch/local-juju-env-provisioning/releases) for available versions.
+Check the [releases page](https://github.com/canonical/webteam-juju-dev-provisioning/releases) for available versions.
 
 ## Troubleshooting
 
