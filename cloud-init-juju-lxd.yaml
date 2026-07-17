@@ -59,6 +59,11 @@ runcmd:
     adduser ubuntu lxd
 
   - |
+    # Ensure snapd.apparmor is running — required for snap confinement in containers.
+    # Without this, microk8s commands fail with "missing profile snap.microk8s.microk8s".
+    systemctl enable snapd.apparmor --now 2>/dev/null || true
+
+  - |
     # Setup microk8s (classic confinement — group is 'microk8s')
     sudo usermod -a -G microk8s ubuntu
     sudo -u ubuntu mkdir -p /home/ubuntu/.kube
