@@ -129,6 +129,16 @@ HOST_UID=$(id -u)
 HOST_GID=$(id -g)
 if [ "$HOST_UID" != "1000" ] || [ "$HOST_GID" != "1000" ]; then
     echo "Remapping container ubuntu user to host UID:GID ($HOST_UID:$HOST_GID)..."
+    retries=0
+    until lxc exec "$INSTANCE_NAME" -- id ubuntu &>/dev/null; do
+        retries=$((retries + 1))
+        if [ "$retries" -ge 30 ]; then
+            echo "Error: timed out waiting for ubuntu user to be created in container." >&2
+            exit 1
+        fi
+        echo "Waiting for ubuntu user creation... ($retries/30)"
+        sleep 1
+    done
     lxc exec "$INSTANCE_NAME" -- usermod -u "$HOST_UID" ubuntu
     lxc exec "$INSTANCE_NAME" -- groupmod -g "$HOST_GID" ubuntu
     lxc exec "$INSTANCE_NAME" -- chown -R "$HOST_UID:$HOST_GID" /home/ubuntu
