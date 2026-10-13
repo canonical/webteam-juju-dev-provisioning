@@ -91,29 +91,30 @@ multipass shell myproject
 ### LXD container
 
 ```bash
-JUJU_LXD_CPUS=4 JUJU_LXD_MEMORY=4GB ./launch_instance_lxd.sh myproject
+JUJU_CPUS=4 JUJU_MEMORY=4GB ./launch_instance_lxd.sh myproject
 ```
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `JUJU_LXD_IMAGE`   | `ubuntu:24.04` | Base image |
-| `JUJU_LXD_CPUS`    | `2`    | Number of CPUs |
-| `JUJU_LXD_MEMORY`  | `3GB`  | Memory allocation |
-| `JUJU_LXD_DISK`    | `20GB` | Root disk size |
-| `JUJU_LXD_TIMEOUT` | `3600` | Cloud-init timeout (seconds) |
+| Variable | Default | Fallback | Description |
+|----------|---------|----------|-------------|
+| `JUJU_BASE_IMAGE` | `ubuntu:24.04` | `JUJU_LXD_IMAGE` | Base image |
+| `JUJU_CPUS`       | `2`    | `JUJU_LXD_CPUS`    | Number of CPUs |
+| `JUJU_MEMORY`     | `3GB`  | `JUJU_LXD_MEMORY`  | Memory allocation |
+| `JUJU_DISK`       | `20GB` | `JUJU_LXD_DISK`    | Root disk size |
+| `JUJU_TIMEOUT`    | `3600` | `JUJU_LXD_TIMEOUT` | Cloud-init timeout (seconds) |
 
 ### Multipass VM
 
 ```bash
-JUJU_VM_CPUS=8 JUJU_VM_MEMORY=8G ./launch_instance.sh myproject
+JUJU_CPUS=8 JUJU_MEMORY=8G ./launch_instance.sh myproject
 ```
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `JUJU_VM_CPUS`    | `6`    | Number of CPUs |
-| `JUJU_VM_MEMORY`  | `6G`   | Memory allocation |
-| `JUJU_VM_DISK`    | `50G`  | Disk size |
-| `JUJU_VM_TIMEOUT` | `3600` | Launch timeout (seconds) |
+| Variable | Default | Fallback | Description |
+|----------|---------|----------|-------------|
+| `JUJU_BASE_IMAGE` | `24.04` | — | Ubuntu image (recommended: `24.04`) |
+| `JUJU_CPUS`       | `6`    | `JUJU_VM_CPUS`    | Number of CPUs |
+| `JUJU_MEMORY`     | `6G`   | `JUJU_VM_MEMORY`  | Memory allocation |
+| `JUJU_DISK`       | `50G`  | `JUJU_VM_DISK`    | Disk size |
+| `JUJU_TIMEOUT`    | `3600` | `JUJU_VM_TIMEOUT` | Launch timeout (seconds) |
 
 ## Utility Functions
 
@@ -190,6 +191,12 @@ juju_local.yaml
 This repository uses semantic versioning. Pin to a specific version tag in your scripts.
 
 Check the [releases page](https://github.com/canonical/webteam-juju-dev-provisioning/releases) for available versions.
+
+## UID/GID Remapping (LXD)
+
+When using LXD with privileged containers, the host user's UID/GID must match the container's `ubuntu` user for bind-mounted project files to be accessible. If your host UID/GID differs from the default `1000`, `launch_instance_lxd.sh` automatically remaps the container's `ubuntu` user to match.
+
+This runs automatically — no configuration needed.
 
 ## Troubleshooting
 
