@@ -12,7 +12,7 @@ package_update: true
 
 snap:
   commands:
-    - snap install microk8s --classic --channel 1.31/stable
+    - snap install microk8s --classic --channel 1.35/stable
     - snap alias microk8s.kubectl kubectl
     - snap alias microk8s.kubectl k
     - snap install --classic charmcraft
