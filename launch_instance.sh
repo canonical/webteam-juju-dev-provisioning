@@ -11,10 +11,11 @@ MOUNT_POINT="/home/ubuntu/project"
 CLOUD_INIT_FILE="./cloud-init-juju.yaml"
 
 # VM Resources (can be overridden via environment variables)
-CPUS="${JUJU_VM_CPUS:-6}"
-MEMORY="${JUJU_VM_MEMORY:-6G}"
-DISK="${JUJU_VM_DISK:-50G}"
-TIMEOUT="${JUJU_VM_TIMEOUT:-3600}"
+IMAGE="${JUJU_BASE_IMAGE:-24.04}"
+CPUS="${JUJU_CPUS:-${JUJU_VM_CPUS:-6}}"
+MEMORY="${JUJU_MEMORY:-${JUJU_VM_MEMORY:-6G}}"
+DISK="${JUJU_DISK:-${JUJU_VM_DISK:-50G}}"
+TIMEOUT="${JUJU_TIMEOUT:-${JUJU_VM_TIMEOUT:-3600}}"
 
 usage() {
     echo "Usage: $0 [INSTANCE_NAME]"
@@ -25,10 +26,11 @@ usage() {
     echo "  INSTANCE_NAME    Name for the multipass instance (default: juju-dev)"
     echo ""
     echo "Environment Variables:"
-    echo "  JUJU_VM_CPUS     Number of CPUs (default: 6)"
-    echo "  JUJU_VM_MEMORY   Memory allocation (default: 6G)"
-    echo "  JUJU_VM_DISK     Disk size (default: 50G)"
-    echo "  JUJU_VM_TIMEOUT  Launch timeout in seconds (default: 3600)"
+    echo "  JUJU_BASE_IMAGE  Ubuntu release to use (default: 24.04)"
+    echo "  JUJU_CPUS        Number of CPUs (default: 6)"
+    echo "  JUJU_MEMORY      Memory allocation (default: 6G)"
+    echo "  JUJU_DISK        Disk size (default: 50G)"
+    echo "  JUJU_TIMEOUT     Launch timeout in seconds (default: 3600)"
     echo ""
     echo "Prerequisites:"
     echo "  - multipass installed (https://multipass.run/)"
@@ -37,7 +39,7 @@ usage() {
     echo "Examples:"
     echo "  $0                        # Launch with default name 'juju-dev'"
     echo "  $0 myproject              # Launch with name 'myproject'"
-    echo "  JUJU_VM_CPUS=8 $0         # Launch with 8 CPUs"
+    echo "  JUJU_CPUS=8 $0         # Launch with 8 CPUs"
 }
 
 if [[ "$1" == "-h" || "$1" == "--help" ]]; then
@@ -67,6 +69,7 @@ fi
 
 # Launch the multipass instance with cloud-init
 echo "Launching $INSTANCE_NAME instance..."
+echo "  Image: $IMAGE"
 echo "  CPUs: $CPUS"
 echo "  Memory: $MEMORY"
 echo "  Disk: $DISK"
@@ -74,7 +77,7 @@ echo "  Timeout: ${TIMEOUT}s"
 echo ""
 
 # Redirect multipass output to suppress the spinner
-multipass launch --name "$INSTANCE_NAME" --cpus "$CPUS" --memory "$MEMORY" --disk "$DISK" --timeout "$TIMEOUT" --cloud-init "$CLOUD_INIT_FILE" > /tmp/multipass-launch.log 2>&1 &
+multipass launch "$IMAGE" --name "$INSTANCE_NAME" --cpus "$CPUS" --memory "$MEMORY" --disk "$DISK" --timeout "$TIMEOUT" --cloud-init "$CLOUD_INIT_FILE" > /tmp/multipass-launch.log 2>&1 &
 
 # Wait for instance to be running
 echo -n "Waiting for instance to be ready"
@@ -99,8 +102,12 @@ echo "======================================"
 echo "Waiting for cloud-init to complete..."
 while true; do
     status=$(multipass exec "$INSTANCE_NAME" -- cloud-init status --wait || true)
-    if [[ "$status" == *"done"* ]]; then
-        echo "Cloud-init has completed successfully!"
+    if [[ "$status" == *"done"* || "$status" == *"degraded"* ]]; then
+        echo "Cloud-init has completed!"
+        break
+    elif [[ "$status" == *"error"* || "$status" == *"recoverable error"* ]]; then
+        echo "WARNING: Cloud-init finished with errors."
+        echo "Check logs with: multipass exec $INSTANCE_NAME -- cat /var/log/cloud-init-output.log"
         break
     fi
 done

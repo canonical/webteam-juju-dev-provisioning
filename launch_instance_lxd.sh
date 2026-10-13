@@ -13,13 +13,13 @@ set -e
 INSTANCE_NAME="${1:-juju-dev}"
 MOUNT_POINT="/home/ubuntu/project"
 CLOUD_INIT_FILE="./cloud-init-juju-lxd.yaml"
-IMAGE="${JUJU_LXD_IMAGE:-ubuntu:24.04}"
+IMAGE="${JUJU_BASE_IMAGE:-${JUJU_LXD_IMAGE:-ubuntu:24.04}}"
 
 # Container Resources (can be overridden via environment variables)
-CPUS="${JUJU_LXD_CPUS:-2}"
-MEMORY="${JUJU_LXD_MEMORY:-3GB}"
-DISK="${JUJU_LXD_DISK:-20GB}"
-TIMEOUT="${JUJU_LXD_TIMEOUT:-3600}"
+CPUS="${JUJU_CPUS:-${JUJU_LXD_CPUS:-2}}"
+MEMORY="${JUJU_MEMORY:-${JUJU_LXD_MEMORY:-3GB}}"
+DISK="${JUJU_DISK:-${JUJU_LXD_DISK:-20GB}}"
+TIMEOUT="${JUJU_TIMEOUT:-${JUJU_LXD_TIMEOUT:-3600}}"
 
 usage() {
     echo "Usage: $0 [INSTANCE_NAME]"
@@ -30,11 +30,12 @@ usage() {
     echo "  INSTANCE_NAME    Name for the LXC container (default: juju-dev)"
     echo ""
     echo "Environment Variables:"
-    echo "  JUJU_LXD_IMAGE   Base image (default: ubuntu:24.04)"
-    echo "  JUJU_LXD_CPUS    Number of CPUs (default: 2)"
-    echo "  JUJU_LXD_MEMORY  Memory allocation (default: 3GB)"
-    echo "  JUJU_LXD_DISK    Root disk size (default: 20GB)"
-    echo "  JUJU_LXD_TIMEOUT Cloud-init timeout in seconds (default: 3600)"
+    echo "  JUJU_BASE_IMAGE  Base image (default: ubuntu:24.04)"
+    echo "                   Also accepts: JUJU_LXD_IMAGE (deprecated)"
+    echo "  JUJU_CPUS        Number of CPUs (default: 2)"
+    echo "  JUJU_MEMORY      Memory allocation (default: 3GB)"
+    echo "  JUJU_DISK        Root disk size (default: 20GB)"
+    echo "  JUJU_TIMEOUT     Cloud-init timeout in seconds (default: 3600)"
     echo ""
     echo "Prerequisites:"
     echo "  - LXD installed and initialised (snap install lxd && lxd init --auto)"
@@ -43,7 +44,7 @@ usage() {
     echo "Examples:"
     echo "  $0                        # Launch with default name 'juju-dev'"
     echo "  $0 myproject              # Launch with name 'myproject'"
-    echo "  JUJU_LXD_CPUS=4 $0       # Launch with 4 CPUs"
+    echo "  JUJU_CPUS=4 $0       # Launch with 4 CPUs"
 }
 
 if [[ "$1" == "-h" || "$1" == "--help" ]]; then
@@ -119,6 +120,20 @@ while ! lxc list --format csv -c ns 2>/dev/null | grep -q "^${INSTANCE_NAME},RUN
     echo -n "."
 done
 echo " Container is running and cloud-init is in progress!"
+
+# Remap the container's ubuntu user UID/GID to match the host user.
+# The container is privileged so UIDs pass through directly on bind mounts.
+# Without this, files owned by the host user are inaccessible to the container's
+# ubuntu user (and vice versa) whenever the host UID differs from 1000.
+HOST_UID=$(id -u)
+HOST_GID=$(id -g)
+if [ "$HOST_UID" != "1000" ] || [ "$HOST_GID" != "1000" ]; then
+    echo "Remapping container ubuntu user to host UID:GID ($HOST_UID:$HOST_GID)..."
+    lxc exec "$INSTANCE_NAME" -- usermod -u "$HOST_UID" ubuntu
+    lxc exec "$INSTANCE_NAME" -- groupmod -g "$HOST_GID" ubuntu
+    lxc exec "$INSTANCE_NAME" -- chown -R "$HOST_UID:$HOST_GID" /home/ubuntu
+fi
+
 echo "Current directory mounted at $MOUNT_POINT."
 
 # Follow cloud-init logs in real-time
@@ -135,7 +150,7 @@ while true; do
     if [[ "$status" == *"done"* ]]; then
         echo "Cloud-init has completed successfully!"
         break
-    elif [[ "$status" == *"error"* || "$status" == *"recoverable error"* ]]; then
+    elif [[ "$status" == *"error"* || "$status" == *"recoverable error"* || "$status" == *"degraded"* ]]; then
         echo "WARNING: Cloud-init finished with errors."
         echo "Check logs with: lxc exec $INSTANCE_NAME -- cat /var/log/cloud-init-output.log"
         break
