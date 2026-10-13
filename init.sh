@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-REPO="${REPO:-pedoch/local-juju-env-provisioning}"
+REPO="${REPO:-canonical/webteam-juju-dev-provisioning}"
 BACKEND="${BACKEND:-}"
 VERSION="${VERSION:-main}"
 BASE="https://raw.githubusercontent.com/$REPO/$VERSION"
