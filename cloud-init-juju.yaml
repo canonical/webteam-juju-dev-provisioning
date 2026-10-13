@@ -1,0 +1,304 @@
+#cloud-config
+---
+package_update: true
+
+snap:
+  commands:
+    - snap install microk8s --channel 1.31-strict/stable
+    - snap alias microk8s.kubectl kubectl
+    - snap alias microk8s.kubectl k
+    - snap install --classic charmcraft
+    - snap install --classic rockcraft
+    - snap install juju --channel=3.6/candidate
+    - snap refresh
+
+runcmd:
+  - DEBIAN_FRONTEND=noninteractive apt-get remove -y landscape-client landscape-common adwaita-icon-theme humanity-icon-theme
+  - DEBIAN_FRONTEND=noninteractive apt-get -y upgrade
+  - DEBIAN_FRONTEND=noninteractive apt-get -y autoremove
+
+  - |
+    # disable swap
+    sysctl -w vm.swappiness=0
+    echo "vm.swappiness = 0" | tee -a /etc/sysctl.conf
+    swapoff -a
+
+  - |
+    # disable unnecessary services
+    systemctl disable man-db.timer man-db.service --now
+    systemctl disable apport.service apport-autoreport.service  --now
+    systemctl disable apt-daily.service apt-daily.timer --now
+    systemctl disable apt-daily-upgrade.service apt-daily-upgrade.timer --now
+    systemctl disable unattended-upgrades.service --now
+    systemctl disable motd-news.service motd-news.timer --now
+    systemctl disable bluetooth.target --now
+    systemctl disable ua-messaging.service ua-messaging.timer --now
+    systemctl disable ua-timer.timer ua-timer.service --now
+    systemctl disable systemd-tmpfiles-clean.timer --now
+
+    # Disable IPv6
+    echo "net.ipv6.conf.all.disable_ipv6=1" | tee -a /etc/sysctl.conf
+    echo "net.ipv6.conf.default.disable_ipv6=1" | tee -a /etc/sysctl.conf
+    echo "net.ipv6.conf.lo.disable_ipv6=1" | tee -a /etc/sysctl.conf
+    sysctl -p
+
+  - |
+    # set right owner to /home/ubuntu directory
+    chown ubuntu:ubuntu /home/ubuntu
+
+  - |
+    # Make sure juju directory is there
+    sudo -u ubuntu mkdir -p /home/ubuntu/.local/share/juju
+
+  - |
+    # setup charmcraft
+    lxd init --auto
+    adduser ubuntu lxd
+
+  - |
+    # setup microk8s
+    sudo usermod -a -G snap_microk8s ubuntu
+    sudo -u ubuntu mkdir -p /home/ubuntu/.kube
+    adduser ubuntu snap_microk8s
+    microk8s status --wait-ready
+
+    # Color codes for output
+    YELLOW='\033[1;33m'
+    NC='\033[0m' # No Color
+
+    # Wait for API server to be fully operational
+    echo "Waiting for Kubernetes API server to be ready..."
+    timeout=180
+    elapsed=0
+    until microk8s kubectl get nodes > /dev/null 2>&1; do
+      if [ $elapsed -ge $timeout ]; then
+        echo -e "${YELLOW}WARNING: Kubernetes API server failed to become ready after ${timeout} seconds${NC}"
+        echo -e "${YELLOW}WARNING: Continuing anyway, but addons may fail to enable properly${NC}"
+        break
+      fi
+      sleep 3
+      elapsed=$((elapsed + 3))
+      echo -n "."
+    done
+    echo ""
+    if microk8s kubectl get nodes > /dev/null 2>&1; then
+      echo "Kubernetes API server is ready!"
+    else
+      echo -e "${YELLOW}WARNING: Kubernetes API server check skipped due to timeout${NC}"
+    fi
+
+    # Enable registry with retry
+    for attempt in 1 2 3; do
+      echo "Enabling registry (attempt $attempt)..."
+      microk8s.enable registry
+      sleep 10
+
+      # Check if registry is responding
+      if curl -sf http://localhost:32000/v2/_catalog > /dev/null 2>&1; then
+        echo "✓ Registry is ready!"
+        break
+      fi
+
+      # Retry if not the last attempt
+      if [ $attempt -lt 3 ]; then
+        echo "Registry not responding, retrying..."
+        microk8s.disable registry || true
+        sleep 5
+      else
+        echo -e "${YELLOW}WARNING: Registry failed after 3 attempts. May need manual fix.${NC}"
+      fi
+    done
+
+    microk8s.enable metrics-server
+    microk8s.kubectl rollout status deployments/metrics-server -n kube-system -w --timeout=600s
+
+    # The dns addon will restart the api server so you may see a blip in the availability
+    # Separating addons to avoid errors such as
+    # dial tcp 127.0.0.1:16443: connect: connection refused
+    microk8s.enable dns
+    microk8s.enable storage
+    microk8s.enable rbac
+    microk8s.kubectl rollout status deployments/coredns -n kube-system -w --timeout=600s
+
+    microk8s.enable hostpath-storage
+    microk8s.enable ingress
+    # wait for storage, ingress to become available
+    microk8s.kubectl rollout status deployments/hostpath-provisioner -n kube-system -w --timeout=600s
+    microk8s.kubectl rollout status daemonsets/nginx-ingress-microk8s-controller -n ingress -w --timeout=600s
+
+  - |
+    # Install Terraform
+    echo ""
+    echo "===== Installing Terraform ====="
+    wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+    echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/hashicorp.list
+    apt update && apt install -y terraform
+    echo "Terraform installed: $(terraform version | head -1)"
+
+  - |
+    # Helper function to add user and grant model access
+    add_juju_user_with_password() {
+      local username=$1
+      local password=$2
+      local controller=$3
+      local model=$4
+
+      echo "Creating user $username for model $model"
+
+      # Add user and capture registration token
+      local output=$(sudo -u ubuntu juju add-user "$username" -c "$controller" 2>&1)
+
+      if [ $? -eq 0 ]; then
+        echo "User $username added successfully"
+
+        # Set the user's password (--no-prompt reads single line from stdin)
+        echo "Setting password for user $username"
+        echo "$password" | sudo -u ubuntu juju change-user-password "$username" --no-prompt -c "$controller"
+
+        # Grant admin access to the specific model (admin needed for creating offers)
+        echo "Granting $username admin access to model $model"
+        sudo -u ubuntu juju grant "$username" admin "$model" -c "$controller"
+
+        # Save credentials to file for later use (Vault/Terraform)
+        sudo -u ubuntu mkdir -p /home/ubuntu/.juju-credentials
+        local creds_file="/home/ubuntu/.juju-credentials/${controller}-${username}.yaml"
+        printf 'username: %s\npassword: %s\ncontroller: %s\nmodel: %s\n' \
+          "$username" "$password" "$controller" "$model" | sudo -u ubuntu tee "$creds_file" > /dev/null
+        chmod 600 "$creds_file"
+        echo "Credentials saved to $creds_file"
+
+        # Extract and save registration token for later use
+        local token=$(echo "$output" | grep "juju register" | sed 's/.*juju register //')
+        if [ -n "$token" ]; then
+          echo "Registration token saved to /home/ubuntu/.juju-tokens/${controller}-${username}.token"
+          sudo -u ubuntu mkdir -p /home/ubuntu/.juju-tokens
+          echo "$token" | sudo -u ubuntu tee "/home/ubuntu/.juju-tokens/${controller}-${username}.token" > /dev/null
+          echo "To register this user from another machine, use: juju register $token"
+        fi
+      else
+        echo "Failed to add user $username: $output"
+      fi
+    }
+  - |
+    # Set up and bootstrap juju environment
+    echo ""
+    echo "===== Setting up juju environment ====="
+
+    # Ensure microk8s is ready before getting its config
+    echo "Waiting for microk8s to be ready..."
+    microk8s status --wait-ready
+
+    # Prepare kubeconfig for juju (needed for add-k8s command)
+    echo "Creating kubeconfig for juju..."
+    sudo -u ubuntu mkdir -p /home/ubuntu/.kube
+    microk8s config | sudo -u ubuntu tee /home/ubuntu/.kube/config > /dev/null
+    sudo chown ubuntu:ubuntu /home/ubuntu/.kube/config
+
+    JUJU_ENV_FILE="/home/ubuntu/project/juju_local.yaml"
+
+    if [ -f "$JUJU_ENV_FILE" ]; then
+      echo "$JUJU_ENV_FILE exists, setting up juju environment from configuration."
+
+      # Bootstrap all controllers on localhost (LXD) first
+      for name in $(python3 -c 'import yaml; [print(c["name"]) for c in yaml.safe_load(open("'"$JUJU_ENV_FILE"'")).get("controllers", [])]'); do
+        echo "Bootstrapping controller $name on localhost (LXD)"
+        sudo -u ubuntu juju bootstrap localhost "$name"
+      done
+
+      # Add mk8s cloud to client first
+      echo "Adding mk8s cloud to juju client..."
+      sudo -u ubuntu juju add-k8s mk8s --client
+
+      # Then add mk8s cloud to each controller
+      for name in $(python3 -c 'import yaml; [print(c["name"]) for c in yaml.safe_load(open("'"$JUJU_ENV_FILE"'")).get("controllers", [])]'); do
+        echo "Adding mk8s cloud to controller $name"
+        sudo -u ubuntu juju add-k8s mk8s --controller "$name" 2>&1 || echo "Warning: mk8s may already exist on controller $name"
+      done
+
+      # Create models with cloud specification and users using Python to read YAML
+      python3 -c 'import yaml; [print(m["name"] + " " + m["controller"] + " " + m.get("cloud", "localhost")) for m in yaml.safe_load(open("'"$JUJU_ENV_FILE"'")).get("models", [])]' | while read -r model_name controller_name cloud_name; do
+        # Map 'microk8s' cloud name to the shared mk8s cloud
+        if [ "$cloud_name" = "microk8s" ]; then
+          actual_cloud="mk8s"
+        else
+          actual_cloud="$cloud_name"
+        fi
+
+        echo "Creating model $model_name on cloud $actual_cloud in controller $controller_name"
+        sudo -u ubuntu juju add-model "$model_name" "$actual_cloud" -c "$controller_name"
+
+        # Create user for model (username and password = model name)
+        add_juju_user_with_password $model_name $model_name $controller_name $model_name
+      done
+
+      echo "Juju environment provisioning complete!"
+
+      # Deploy services if defined in the configuration
+      echo "Checking for services to deploy..."
+      python3 -c 'import yaml; services = yaml.safe_load(open("'"$JUJU_ENV_FILE"'")).get("services", []); print(" ".join(services) if services else "")' | while read -r services_line; do
+        if [ -z "$services_line" ]; then
+          echo "No services to deploy"
+          break
+        fi
+
+        for service in $services_line; do
+          echo "Deploying service: $service"
+
+          case "$service" in
+            vault)
+              echo "Setting up Vault service..."
+              # Install Vault
+              wget -O - https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+
+              echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(grep -oP '(?<=UBUNTU_CODENAME=).*' /etc/os-release || lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+
+              sudo apt update && sudo apt install -y vault
+
+              echo "Vault service deployed. Credentials saved to /home/ubuntu/.vault-init.txt"
+              ;;
+
+            dbaas)
+              echo "Setting up DBaaS service..."
+              # Bootstrap new dbaas controller on localhost (LXD)
+              sudo -u ubuntu juju bootstrap localhost dbaas
+
+              # Create dbaas model on localhost (LXD)
+              sudo -u ubuntu juju add-model dbaas localhost -c dbaas
+
+              # Deploy PostgreSQL charm
+              sudo -u ubuntu juju deploy postgresql -n 1 -m dbaas:dbaas --channel 14/stable
+
+              # Wait for PostgreSQL to be active
+              echo "Waiting for PostgreSQL to become active..."
+              sudo -u ubuntu juju wait-for application postgresql -m dbaas:dbaas --timeout=10m
+
+              # Create offer for cross-model relations
+              echo "Creating PostgreSQL offer..."
+              sudo -u ubuntu juju offer -c dbaas postgresql:database dbaas-postgresql
+
+              echo "DBaaS service deployed. PostgreSQL offer: dbaas:admin/dbaas.dbaas-postgresql"
+              ;;
+
+            *)
+              echo "Unknown service: $service. Skipping..."
+              ;;
+          esac
+        done
+      done
+
+      echo "All services deployed successfully!"
+    else
+      echo "$JUJU_ENV_FILE does not exist. Creating default controllers."
+
+      # Bootstrap two separate controllers for simple default setup
+      echo "Bootstrapping default microk8s controller..."
+      sudo -u ubuntu juju bootstrap microk8s microk8s
+
+      echo "Bootstrapping default lxd controller..."
+      sudo -u ubuntu juju bootstrap localhost lxd
+
+      echo "Default controllers created: 'microk8s' and 'lxd'"
+      echo "Use 'juju switch microk8s' or 'juju switch lxd' to select a controller"
+    fi
+
+final_message: "The system is finally up, after $UPTIME seconds"

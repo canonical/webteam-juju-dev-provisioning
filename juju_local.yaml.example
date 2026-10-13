@@ -1,0 +1,36 @@
+# Juju Environment Replication Schema
+# Purpose: Define production/staging Juju environments for local replication
+# Use case: Validate Terraform plans against a local mirror before deploying to real infrastructure
+#
+# Copy this file to juju_local.yaml and customize for your project
+
+schema_version: "1.0"
+
+# Juju version - should match production
+juju:
+  version: "3.6/candidate" # Will be installed via cloud-init
+
+# Define controllers that exist in your actual infrastructure
+# The cloud-init script bootstraps controllers on localhost (LXD)
+controllers:
+  - name: "myproject"
+
+# Models within each controller
+# Each model will have a user created with the same name/password
+# Credentials are saved to /home/ubuntu/.juju-credentials/
+models:
+  # Kubernetes model - for k8s workloads
+  - name: "myproject-k8s"
+    controller: "myproject"
+    cloud: "microk8s"  # Maps to 'mk8s' cloud in the VM
+
+  # VM model - for VM/LXD workloads
+  - name: "myproject-vm"
+    controller: "myproject"
+    cloud: "localhost"  # LXD cloud
+
+# Optional: Services to deploy during provisioning
+# Available services: vault, dbaas
+services:
+  - vault   # HashiCorp Vault for secrets management
+  - dbaas   # PostgreSQL with cross-model offer
