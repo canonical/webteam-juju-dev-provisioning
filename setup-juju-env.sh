@@ -171,9 +171,12 @@ deploy_services() {
 
       dbaas)
         echo "Setting up DBaaS service..."
+        local postgresql_channel
+        postgresql_channel=$(python3 -c 'import yaml; print((yaml.safe_load(open("'"$JUJU_ENV_FILE"'")).get("dbaas") or {}).get("postgresql_channel", "16/stable"))')
+        echo "PostgreSQL charm channel: $postgresql_channel"
         sudo -u ubuntu juju bootstrap localhost dbaas
         sudo -u ubuntu juju add-model dbaas localhost -c dbaas
-        sudo -u ubuntu juju deploy postgresql -n 1 -m dbaas:dbaas --channel 14/stable
+        sudo -u ubuntu juju deploy postgresql -n 1 -m dbaas:dbaas --channel "$postgresql_channel"
 
         echo "Waiting for PostgreSQL to become active..."
         sudo -u ubuntu juju wait-for application postgresql -m dbaas:dbaas --timeout=10m

@@ -34,3 +34,7 @@ models:
 services:
   - vault   # HashiCorp Vault for secrets management
   - dbaas   # PostgreSQL with cross-model offer
+
+# Optional: settings for the dbaas service
+dbaas:
+  postgresql_channel: "16/stable"  # Charm channel of the PostgreSQL to deploy, e.g. 14/stable
