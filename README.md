@@ -64,6 +64,11 @@ models:
 services:
   - vault
   - dbaas
+
+# Optional. Charm channel of the PostgreSQL that the dbaas service deploys.
+# Defaults to 16/stable.
+dbaas:
+  postgresql_channel: "14/stable"
 ```
 
 ### 3. Launch
