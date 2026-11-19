@@ -101,7 +101,7 @@ lxc launch "$IMAGE" "$INSTANCE_NAME" \
     --config=linux.kernel_modules="ip_vs,ip_vs_rr,ip_vs_wrr,ip_vs_sh,ip_tables,ip6_tables,netlink_diag,nf_nat,overlay,br_netfilter" \
     --config=raw.lxc="lxc.apparmor.profile=unconfined
 lxc.mount.auto=proc:rw sys:rw cgroup:rw
-lxc.cgroup.devices.allow=a
+lxc.cgroup2.devices.allow=a
 lxc.cap.drop="
 
 # Set root disk size
